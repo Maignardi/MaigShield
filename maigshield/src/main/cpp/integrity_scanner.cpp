@@ -14,18 +14,18 @@ namespace maigshield::integrity {
 
 void IntegrityScanner::trigger_honeypot(uint32_t honeypot_id) {
     if (honeypot_id < 64) {
-        s_honeypot_state |= (1ULL << honeypot_id);
+        s_honeypot_state.fetch_or(1ULL << honeypot_id, std::memory_order_relaxed);
     } else {
-        s_honeypot_state |= 1ULL;
+        s_honeypot_state.fetch_or(1ULL, std::memory_order_relaxed);
     }
 }
 
 bool IntegrityScanner::is_honeypot_triggered() {
-    return s_honeypot_state != 0;
+    return s_honeypot_state.load(std::memory_order_relaxed) != 0;
 }
 
 uint64_t IntegrityScanner::get_honeypot_mask() {
-    return s_honeypot_state;
+    return s_honeypot_state.load(std::memory_order_relaxed);
 }
 
 bool IntegrityScanner::check_ptrace_seal() {
@@ -97,6 +97,9 @@ uint64_t IntegrityScanner::scan_proc_maps() {
     OBFUSCATE_STACK(kw_magisk, "magisk");
     OBFUSCATE_STACK(kw_tmp, "/data/local/tmp");
     OBFUSCATE_STACK(kw_rwxp, "rwxp");
+    OBFUSCATE_STACK(kw_jit_cache, "jit-cache");
+    OBFUSCATE_STACK(kw_dalvik_jit, "dalvik-jit-code-cache");
+    OBFUSCATE_STACK(kw_zygote_jit, "jit-zygote-cache");
 
     while ((n = sys::sys_read(static_cast<int>(fd), chunk, sizeof(chunk))) > 0) {
         for (long i = 0; i < n; ++i) {
@@ -124,7 +127,10 @@ uint64_t IntegrityScanner::scan_proc_maps() {
                     strstr(line, kw_tmp.c_str())) {
                     flags |= FLAG_MAGISK_ZYGISK_MAPPED;
                 }
-                if (strstr(line, kw_rwxp.c_str()) != nullptr) {
+                if (strstr(line, kw_rwxp.c_str()) != nullptr &&
+                    strstr(line, kw_jit_cache.c_str()) == nullptr &&
+                    strstr(line, kw_dalvik_jit.c_str()) == nullptr &&
+                    strstr(line, kw_zygote_jit.c_str()) == nullptr) {
                     flags |= FLAG_ANONYMOUS_EXEC_MAPPED;
                 }
 
@@ -140,8 +146,9 @@ uint64_t IntegrityScanner::scan_proc_maps() {
 }
 
 bool IntegrityScanner::scan_threads() {
-    DIR* dir = opendir("/proc/self/task");
-    if (!dir) {
+    OBFUSCATE_STACK(path_task, "/proc/self/task");
+    long dir_fd = sys::sys_openat(AT_FDCWD, path_task.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+    if (dir_fd < 0) {
         return false;
     }
 
@@ -150,37 +157,56 @@ bool IntegrityScanner::scan_threads() {
     OBFUSCATE_STACK(kw_pool, "pool-frida");
     OBFUSCATE_STACK(kw_gdbus, "gdbus");
     OBFUSCATE_STACK(kw_frida, "frida");
+    OBFUSCATE_STACK(comm_suffix, "/comm");
 
-    struct dirent* entry;
+    char dir_buf[4096];
     bool detected = false;
+    long nread = 0;
 
-    while ((entry = readdir(dir)) != nullptr) {
-        if (entry->d_name[0] == '.') continue;
+    while (!detected && (nread = sys::sys_getdents64(static_cast<int>(dir_fd), dir_buf, sizeof(dir_buf))) > 0) {
+        long bpos = 0;
+        while (bpos < nread) {
+            const auto* d = reinterpret_cast<const sys::linux_dirent64*>(dir_buf + bpos);
+            if (d->d_reclen == 0) break;
 
-        char comm_path[128];
-        snprintf(comm_path, sizeof(comm_path), "/proc/self/task/%s/comm", entry->d_name);
+            if (d->d_name[0] != '.') {
+                char comm_path[128];
+                size_t prefix_len = path_task.size();
+                size_t name_len = strnlen(d->d_name, 32);
+                size_t suffix_len = comm_suffix.size();
 
-        long fd = sys::sys_openat(AT_FDCWD, comm_path, O_RDONLY | O_CLOEXEC, 0);
-        if (fd >= 0) {
-            char comm_name[64];
-            long n = sys::sys_read(static_cast<int>(fd), comm_name, sizeof(comm_name) - 1);
-            sys::sys_close(static_cast<int>(fd));
+                if (prefix_len + 1 + name_len + suffix_len < sizeof(comm_path)) {
+                    memcpy(comm_path, path_task.c_str(), prefix_len);
+                    comm_path[prefix_len] = '/';
+                    memcpy(comm_path + prefix_len + 1, d->d_name, name_len);
+                    memcpy(comm_path + prefix_len + 1 + name_len, comm_suffix.c_str(), suffix_len);
+                    comm_path[prefix_len + 1 + name_len + suffix_len] = '\0';
 
-            if (n > 0) {
-                comm_name[n] = '\0';
-                if (strstr(comm_name, kw_gum.c_str()) ||
-                    strstr(comm_name, kw_gmain.c_str()) ||
-                    strstr(comm_name, kw_pool.c_str()) ||
-                    strstr(comm_name, kw_gdbus.c_str()) ||
-                    strstr(comm_name, kw_frida.c_str())) {
-                    detected = true;
-                    break;
+                    long fd = sys::sys_openat(AT_FDCWD, comm_path, O_RDONLY | O_CLOEXEC, 0);
+                    if (fd >= 0) {
+                        char comm_name[64];
+                        long n = sys::sys_read(static_cast<int>(fd), comm_name, sizeof(comm_name) - 1);
+                        sys::sys_close(static_cast<int>(fd));
+
+                        if (n > 0) {
+                            comm_name[n] = '\0';
+                            if (strstr(comm_name, kw_gum.c_str()) ||
+                                strstr(comm_name, kw_gmain.c_str()) ||
+                                strstr(comm_name, kw_pool.c_str()) ||
+                                strstr(comm_name, kw_gdbus.c_str()) ||
+                                strstr(comm_name, kw_frida.c_str())) {
+                                detected = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
+            bpos += d->d_reclen;
         }
     }
 
-    closedir(dir);
+    sys::sys_close(static_cast<int>(dir_fd));
     return detected;
 }
 
@@ -268,7 +294,8 @@ bool IntegrityScanner::check_timing_anomalies() {
     uint64_t elapsed_ns = static_cast<uint64_t>((ts_end.tv_sec - ts_start.tv_sec) * 1000000000ULL +
                                                 (ts_end.tv_nsec - ts_start.tv_nsec));
 
-    return (elapsed_ns > 400000ULL) && (accum != 0);
+    // Calibrated threshold: ~15-50us natively vs >2.5ms under Frida Stalker/DBI instrumentation
+    return (elapsed_ns > 2500000ULL) && (accum != 0);
 }
 
 static uint32_t fnv1a_32(const uint8_t* data, size_t length) {
@@ -313,25 +340,29 @@ bool IntegrityScanner::verify_jni_env(JNIEnv* env) {
         return true;
     }
 
-    void* findClassPtr = reinterpret_cast<void*>(env->functions->FindClass);
-    void* getMethodIdPtr = reinterpret_cast<void*>(env->functions->GetMethodID);
-    void* registerNativesPtr = reinterpret_cast<void*>(env->functions->RegisterNatives);
-
-    if (!findClassPtr || !getMethodIdPtr || !registerNativesPtr) {
-        return true;
-    }
-
-    Dl_info info{};
-    if (dladdr(findClassPtr, &info) == 0 || !info.dli_fname) {
-        return true;
-    }
+    const void* jni_ptrs[] = {
+        reinterpret_cast<const void*>(env->functions->FindClass),
+        reinterpret_cast<const void*>(env->functions->GetMethodID),
+        reinterpret_cast<const void*>(env->functions->RegisterNatives),
+        reinterpret_cast<const void*>(env->functions->CallObjectMethodV),
+        reinterpret_cast<const void*>(env->functions->GetByteArrayElements)
+    };
 
     OBFUSCATE_STACK(libart_name, "libart.so");
     OBFUSCATE_STACK(libdvm_name, "libdvm.so");
 
-    if (strstr(info.dli_fname, libart_name.c_str()) == nullptr &&
-        strstr(info.dli_fname, libdvm_name.c_str()) == nullptr) {
-        return true;
+    for (const void* ptr : jni_ptrs) {
+        if (!ptr) {
+            return true;
+        }
+        Dl_info info{};
+        if (dladdr(ptr, &info) == 0 || !info.dli_fname) {
+            return true;
+        }
+        if (strstr(info.dli_fname, libart_name.c_str()) == nullptr &&
+            strstr(info.dli_fname, libdvm_name.c_str()) == nullptr) {
+            return true;
+        }
     }
 
     return false;
@@ -407,7 +438,7 @@ uint64_t IntegrityScanner::scan_all(JNIEnv* env) {
 
     if (is_honeypot_triggered()) {
         mask |= FLAG_HONEYPOT_TRIGGERED;
-        mask |= (s_honeypot_state << 32);
+        mask |= (get_honeypot_mask() << 32);
     }
 
     return mask;

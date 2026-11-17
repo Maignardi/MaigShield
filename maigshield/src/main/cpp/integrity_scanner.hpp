@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cstddef>
 #include <jni.h>
@@ -30,6 +31,7 @@ constexpr uint64_t FLAG_TAPJACKING_DETECTED      = 1ULL << 18;
 constexpr uint64_t FLAG_SYNTHETIC_TOUCH_DETECTED = 1ULL << 19;
 constexpr uint64_t FLAG_DURESS_DETECTED          = 1ULL << 20;
 constexpr uint64_t FLAG_BOT_DETECTED             = 1ULL << 21;
+constexpr uint64_t FLAG_DEBUGGABLE_APP           = 1ULL << 22;
 
 class IntegrityScanner {
 public:
@@ -53,7 +55,7 @@ public:
     static uint32_t calculate_code_checksum();
 
 private:
-    static inline volatile uint64_t s_honeypot_state{0};
+    static inline std::atomic<uint64_t> s_honeypot_state{0};
 };
 
 } // namespace maigshield::integrity

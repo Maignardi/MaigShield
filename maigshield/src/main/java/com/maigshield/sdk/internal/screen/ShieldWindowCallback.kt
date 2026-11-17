@@ -14,7 +14,8 @@ import com.maigshield.sdk.internal.NativeBridge
 
 internal class ShieldWindowCallback(
     private val delegate: Window.Callback?,
-    private val threatMonitor: ScreenThreatMonitor
+    private val threatMonitor: ScreenThreatMonitor,
+    private val enableBehavioralBiometrics: Boolean = true
 ) : Window.Callback {
 
     override fun dispatchTouchEvent(event: MotionEvent?): Boolean {
@@ -42,35 +43,37 @@ internal class ShieldWindowCallback(
             }
 
             // Dispatch to native biometrics engine
-            try {
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        NativeBridge.nativeOnTouchDown(
-                            event.x,
-                            event.y,
-                            pressure,
-                            size,
-                            touchMajor,
-                            touchMinor,
-                            deviceId
-                        )
+            if (enableBehavioralBiometrics) {
+                try {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            NativeBridge.nativeOnTouchDown(
+                                event.x,
+                                event.y,
+                                pressure,
+                                size,
+                                touchMajor,
+                                touchMinor,
+                                deviceId
+                            )
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            NativeBridge.nativeOnTouchMove(
+                                event.x,
+                                event.y,
+                                pressure,
+                                size,
+                                touchMajor,
+                                touchMinor
+                            )
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            NativeBridge.nativeOnTouchUp(event.x, event.y)
+                        }
                     }
-                    MotionEvent.ACTION_MOVE -> {
-                        NativeBridge.nativeOnTouchMove(
-                            event.x,
-                            event.y,
-                            pressure,
-                            size,
-                            touchMajor,
-                            touchMinor
-                        )
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        NativeBridge.nativeOnTouchUp(event.x, event.y)
-                    }
+                } catch (_: Throwable) {
+                    // Fail-safe protection against native interruptions
                 }
-            } catch (_: Throwable) {
-                // Fail-safe protection against native interruptions
             }
         }
 

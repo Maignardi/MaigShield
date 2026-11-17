@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
                             DebugSecurityOverride.disableSslPinning()
                             Toast.makeText(
                                 this,
-                                "Honeypot acionado! A flag FLAG_HONEYPOT_TRIGGERED foi gravada.",
+                                "Honeypot triggered! FLAG_HONEYPOT_TRIGGERED has been permanently recorded in native memory.",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -86,7 +86,7 @@ fun BankDashboardScreen(
     onHoneypotTriggered: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var pixKey by remember { mutableStateOf("financeiro@empresa.com.br") }
+    var pixKey by remember { mutableStateOf("finance@company.com") }
     var amount by remember { mutableStateOf("1500.00") }
     var isProcessing by remember { mutableStateOf(false) }
     var diagnosticState by remember { mutableStateOf<DiagnosticState?>(null) }
@@ -134,13 +134,13 @@ fun BankDashboardScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Zero-Boolean RASP + Anti-Trojan + Biometria NDK + StrongBox",
+                text = "Zero-Boolean RASP + Anti-Trojan + Native NDK Biometrics + StrongBox",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // Pix Transfer Simulation Card
+        // Payment Transfer Simulation Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -148,7 +148,7 @@ fun BankDashboardScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "💸 Simulação de Transferência Pix",
+                        text = "💸 Payment Transfer Simulation",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
@@ -156,7 +156,7 @@ fun BankDashboardScreen(
                     OutlinedTextField(
                         value = pixKey,
                         onValueChange = { pixKey = it },
-                        label = { Text("Chave Pix de Destino") },
+                        label = { Text("Recipient Payment Key") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -164,7 +164,7 @@ fun BankDashboardScreen(
                     OutlinedTextField(
                         value = amount,
                         onValueChange = { amount = it },
-                        label = { Text("Valor (R$)") },
+                        label = { Text("Amount (BRL)") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -183,9 +183,9 @@ fun BankDashboardScreen(
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Assinando Envelope Criptográfico...")
+                            Text("Signing Cryptographic Envelope...")
                         } else {
-                            Text("Confirmar Transferência Pix")
+                            Text("Confirm Payment Transfer")
                         }
                     }
                 }
@@ -200,14 +200,14 @@ fun BankDashboardScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "🪤 Decepção Cibernética (Honeypot)",
+                        text = "🪤 Active Cyber Deception (Honeypot)",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFE65100),
                         fontSize = 16.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Simula a ação de um invasor invocando DebugSecurityOverride.disableSslPinning() via Frida ou Xposed.",
+                        text = "Simulates an attacker invoking DebugSecurityOverride.disableSslPinning() via Frida or Xposed.",
                         fontSize = 12.sp,
                         color = Color(0xFF5D4037)
                     )
@@ -216,7 +216,7 @@ fun BankDashboardScreen(
                         onClick = onHoneypotTriggered,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
                     ) {
-                        Text("Disparar Honeypot Decoy Hook")
+                        Text("Trigger Honeypot Decoy Hook")
                     }
                 }
             }
@@ -225,7 +225,7 @@ fun BankDashboardScreen(
         // Diagnostic Panel
         item {
             Text(
-                text = "🔍 Painel de Telemetria e Diagnóstico",
+                text = "🔍 Telemetry & Diagnostics Panel",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -250,7 +250,7 @@ fun BankDashboardScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Execute uma transferência Pix para emitir e inspecionar o envelope.",
+                        text = "Complete a payment transfer to generate and inspect the proof envelope.",
                         color = Color.Gray,
                         fontSize = 14.sp
                     )
@@ -325,14 +325,14 @@ fun BiometricsCard(botScore: Int, duressScore: Int) {
                     color = botColor
                 )
                 Text(
-                    text = if (botScore > 100) "Script / Emulador / Toque Sintético" else "Toque Humano Analógico",
+                    text = if (botScore > 100) "Script / Emulator / Synthetic Touch" else "Natural Human Touch",
                     fontSize = 11.sp,
                     color = Color.Gray
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("⚠️ Índice de Coação", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text("⚠️ Duress Tremor Index", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "$duressScore / 255",
@@ -341,7 +341,7 @@ fun BiometricsCard(botScore: Int, duressScore: Int) {
                     color = duressColor
                 )
                 Text(
-                    text = if (duressScore > 100) "Alerta de Coação / Tremor Anômalo" else "Padrão de Calmaria",
+                    text = if (duressScore > 100) "Duress / Abnormal Tremor Detected" else "Calm Baseline Pattern",
                     fontSize = 11.sp,
                     color = Color.Gray
                 )
@@ -370,7 +370,8 @@ fun CanaryFlagsCard(flags: Long) {
         "Accessibility Abuse (Trojan)" to (flags and (1L shl 16) != 0L),
         "Screen Mirroring / VirtualDisplay" to (flags and (1L shl 17) != 0L),
         "Tapjacking (Window Obscured)" to (flags and (1L shl 18) != 0L),
-        "Synthetic Non-Human Touch" to (flags and (1L shl 19) != 0L)
+        "Synthetic Non-Human Touch" to (flags and (1L shl 19) != 0L),
+        "Debuggable App Flag" to (flags and (1L shl 22) != 0L)
     )
 
     Card(
@@ -379,7 +380,7 @@ fun CanaryFlagsCard(flags: Long) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Canary Bitmask Descriptografada",
+                text = "Decrypted Canary Bitmask",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp
             )

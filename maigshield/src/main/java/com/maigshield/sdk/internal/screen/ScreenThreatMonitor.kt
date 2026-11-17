@@ -18,7 +18,8 @@ internal class ScreenThreatMonitor(
     private val context: Context,
     private val enableAccessibilityCheck: Boolean = true,
     private val enableScreenMirrorCheck: Boolean = true,
-    private val enableTapjackingCheck: Boolean = true
+    private val enableTapjackingCheck: Boolean = true,
+    private val enableBehavioralBiometrics: Boolean = true
 ) : Application.ActivityLifecycleCallbacks {
 
     private val accumulatedFlags = AtomicLong(0L)
@@ -170,7 +171,7 @@ internal class ScreenThreatMonitor(
         }
         val currentCallback = window.callback
         if (currentCallback !is ShieldWindowCallback) {
-            window.callback = ShieldWindowCallback(currentCallback, this)
+            window.callback = ShieldWindowCallback(currentCallback, this, enableBehavioralBiometrics)
         }
     }
 

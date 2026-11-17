@@ -191,6 +191,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
         g_methods,
         sizeof(g_methods) / sizeof(g_methods[0])
     );
+    env->DeleteLocalRef(clazz);
 
     if (reg_result != JNI_OK) {
         return JNI_ERR;

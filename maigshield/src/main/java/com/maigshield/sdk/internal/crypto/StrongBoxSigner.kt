@@ -47,14 +47,17 @@ class StrongBoxSigner internal constructor(
     }
 
     private val secureRandom = SecureRandom()
+    private val keyGenLock = Any()
 
     init {
         ensureAttestationKeyExists()
     }
 
     private fun ensureAttestationKeyExists() {
-        if (!keyStore.containsAlias(KEY_ALIAS)) {
-            generateHardwareKey(attemptStrongBox = enableStrongBox)
+        synchronized(keyGenLock) {
+            if (!keyStore.containsAlias(KEY_ALIAS)) {
+                generateHardwareKey(attemptStrongBox = enableStrongBox)
+            }
         }
     }
 
@@ -129,14 +132,17 @@ class StrongBoxSigner internal constructor(
         rsaCipher.init(Cipher.ENCRYPT_MODE, bankPublicKey, oaepParams)
         val encapsulatedKey = rsaCipher.doFinal(ephemeralAesKey.encoded)
 
-        // 3. Encrypt raw binary envelope using AES-256-GCM
+        // 3. Encrypt raw binary envelope using AES-256-GCM with AAD binding
         val iv = ByteArray(GCM_IV_LENGTH).apply {
             secureRandom.nextBytes(this)
         }
         val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
         val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
         aesCipher.init(Cipher.ENCRYPT_MODE, ephemeralAesKey, gcmSpec)
+        aesCipher.updateAAD(byteArrayOf(PROOF_PROTOCOL_VERSION.toByte()))
+        aesCipher.updateAAD(encapsulatedKey)
         val ciphertext = aesCipher.doFinal(rawEnvelope)
+        rawEnvelope.fill(0)
 
         // 4. Sign (EncapsulatedKey + IV + Ciphertext) via StrongBox / TEE ECDSA
         val privateKey = keyStore.getKey(KEY_ALIAS, null) as? PrivateKey
@@ -232,10 +238,12 @@ class StrongBoxSigner internal constructor(
             val aesKeyBytes = rsaCipher.doFinal(encapsulatedKey)
             val ephemeralAesKey = SecretKeySpec(aesKeyBytes, "AES")
 
-            // Decrypt binary envelope
+            // Decrypt binary envelope (verify AAD matches version + encapsulated key)
             val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
             val gcmSpec = GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
             aesCipher.init(Cipher.DECRYPT_MODE, ephemeralAesKey, gcmSpec)
+            aesCipher.updateAAD(byteArrayOf(version.toByte()))
+            aesCipher.updateAAD(encapsulatedKey)
             val rawEnvelope = aesCipher.doFinal(ciphertext)
 
             // Parse 76-byte TelemetryEnvelope

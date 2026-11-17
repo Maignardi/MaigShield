@@ -10,15 +10,15 @@
 
 ---
 
-## 🌟 Visão Geral
+## 🌟 Overview
 
-O **MaigShield** é um SDK Android client-side de defesa cibernética de alta performance projetado para instituições financeiras, fintechs e carteiras de pagamento digital Tier-1. 
+**MaigShield** is a high-performance client-side Android cyber-defense SDK engineered for Tier-1 financial institutions, fintechs, and digital payment wallets.
 
-Diferente de soluções RASP tradicionais que cometem a ingenuidade de retornar `Boolean` (`isRooted`) ou tentar fechar o app (`exit(0)`) — facilmente contornáveis com uma linha de script no Frida —, o MaigShield opera sob a **Arquitetura Zero-Boolean**. Ele não toma decisões locais no cliente; em vez disso, amarra criptograficamente cada requisição HTTP sensível a um **Envelope Binário de 76 bytes** com **polimorfismo dinâmico de sessão**, assinado via **StrongBox/TEE** e criptografado para o datacenter do banco.
+Unlike traditional RASP libraries that naively return `Boolean` flags (`isRooted`, `isHooked`) or attempt to terminate the app (`exit(0)`)—which are trivially bypassed with a single-line Frida script—MaigShield operates under a **Zero-Boolean Architecture**. It never enforces local allow/deny decisions on the client; instead, it cryptographically binds every sensitive HTTP request to a **76-byte Binary Telemetry Envelope** with **per-session bitmask polymorphism**, signed in hardware via **StrongBox/TEE** and hybrid-encrypted for the bank's datacenter.
 
 ---
 
-## 🏛️ Os 5 Pilares de Defesa Blindada
+## 🏛️ The 5 Armored Defense Pillars
 
 ```
                       ┌────────────────────────────────────────────────────────┐
@@ -35,41 +35,41 @@ Diferente de soluções RASP tradicionais que cometem a ingenuidade de retornar 
                                                   │ (JNI_OnLoad / RegisterNatives)
                       ┌───────────────────────────▼────────────────────────────┐
                       │        Native C++20 Core (libmaigshield.so)            │
-                      │  - Direct Syscalls: sys_openat, sys_read, sys_clock    │
+                      │  - Direct Syscalls: openat, read, getdents64, ptrace   │
                       │  - IntegrityScanner: /proc/self/maps, TracerPid, ART   │
                       │  - NativeSensors: NDK ASensorManager + Welford         │
                       │  - TokenPacker: 76-byte Polymorphic Telemetry Envelope │
                       └────────────────────────────────────────────────────────┘
 ```
 
-1. **Zero-Boolean Architecture & Hardware Key Attestation:**
-   - Gera o cabeçalho `X-MaigShield-Proof` contendo timestamp do kernel (`CLOCK_MONOTONIC_RAW`), contador monotônico anti-replay, índices comportamentais e as 64 canary flags.
-   - **Polimorfismo por Sessão:** As posições das flags no bitmask de 64 bits são embaralhadas a cada requisição via algoritmo de Fisher-Yates com semente $\text{salt} \oplus \text{timestamp} \oplus \text{code\_checksum}$.
-   - Criptografia híbrida (AES-256-GCM efêmero + RSA-OAEP SHA-256 do banco) e assinatura em hardware via **StrongBox / TEE** (`EC` P-256 `SHA256withECDSA`).
+1. **Zero-Boolean Architecture, Hybrid Cryptography & Hardware Key Attestation:**
+   - Emits the `X-MaigShield-Proof` header containing a kernel monotonic timestamp (`CLOCK_MONOTONIC_RAW`), persistent anti-replay sequence counter, SHA-256 request binding (`METHOD + URL_PATH + SHA256(BODY)`), behavioral indices, and 64 canary threat flags.
+   - **Per-Session Bitmask Polymorphism:** Canary bit positions within the 64-bit mask are shuffled on every request using a Fisher-Yates permutation seeded with $\text{salt} \oplus \text{timestamp} \oplus \text{code\_checksum}$.
+   - **AEAD Hybrid Encryption & StrongBox Signing:** Ephemeral AES-256-GCM (with AAD binding protocol version and encapsulated key) + RSA-OAEP SHA-256 key encapsulation + Android Keystore **StrongBox / TEE** (`EC` P-256 `SHA256withECDSA` with `setAttestationChallenge`).
 
-2. **Núcleo Nativo Blindado em C++20 (`maigshield-native`):**
-   - **Syscalls Diretas Inline em Assembly:** Invocações `svc #0` (ARM64) e `syscall` (x86_64) para `openat`, `read`, `close` e `clock_gettime`. Bypass total de hooks na `libc.so`.
-   - **Ptrace Sealing:** Bloqueia injeção de debuggers (`sys_ptrace(PTRACE_TRACEME)`).
-   - **Inspeção de Kernel e Threads:** Detecta threads internas do Frida (`gum-js-loop`, `pool-frida`), portas abertas (`27042` / `0x69A2`), namespaces de montagem do KernelSU / APatch / Magisk (`/proc/self/mountinfo`), e páginas anônimas `rwxp`.
-   - **Timing Check & Checksum Pulverizado:** Medição em nanossegundos contra instrumentação dinâmica (Frida Stalker / eBPF). Checksums de código são inseridos no PRNG do token: se um atacante anular checagens com `NOP`, o token gerado quebra matematicamente.
+2. **Hardened C++20 Native Core (`maigshield-native`):**
+   - **Direct Inline Assembly Syscalls:** Raw `svc #0` (ARM64) and `syscall` (x86_64) wrappers for `openat`, `read`, `close`, `getdents64`, `clock_gettime`, and `ptrace`—completely bypassing `libc.so` hooks.
+   - **Compile-Time Rolling String Obfuscation:** C++20 `consteval` position-dependent XOR cipher (`OBFUSCATE_STACK`) with RAII stack memory scrubbing.
+   - **Kernel, Thread & ART Inspection:** Detects Frida threads (`gum-js-loop`, `pool-frida`, `gmain`, `gdbus`), open Frida ports (`27042` / `0x69A2`), KernelSU / APatch / Magisk / Zygisk mounts, anonymous `rwxp` memory pages (excluding legitimate ART JIT caches), and `JNINativeInterface` pointer table hijacking (`FindClass`, `GetMethodID`, `RegisterNatives`, `CallObjectMethodV`, `GetByteArrayElements`).
+   - **Timing Side-Channel & Pulverized Checksums:** Nanosecond latency checks against Frida Stalker / DBI / eBPF, plus executable `.text` checksums mixed directly into the token PRNG seed—if an attacker NOPs out a check, the generated token mathematically breaks.
 
-3. **Escudo Anti-Trojan Bancário & Sequestro de Tela:**
-   - Varredura de `AccessibilityManager` detectando troianos (como BrasDex e SharkBot) abusando de permissões de raspagem de tela e cliques sintéticos.
-   - Monitoramento de espelhamento via `DisplayManager` / `VirtualDisplay` / `MediaProjection`.
-   - Injeção de `FLAG_SECURE` nas janelas e detecção de Tapjacking (`FLAG_WINDOW_IS_OBSCURED`).
+3. **Anti-Banking Trojan & Screen Hijacking Shield:**
+   - Scans `AccessibilityManager` for third-party non-system services abusing `CAPABILITY_CAN_RETRIEVE_WINDOW_CONTENT` or `CAPABILITY_CAN_PERFORM_GESTURES`.
+   - Monitors `DisplayManager` / `VirtualDisplay` / `MediaProjection` for unauthorized screen mirroring and applies `FLAG_SECURE` to protected windows.
+   - Automatically injects `ShieldWindowCallback` across all Activities to flag `FLAG_WINDOW_IS_OBSCURED` / `FLAG_WINDOW_IS_PARTIALLY_OBSCURED` (Tapjacking) and synthetic touches.
 
-4. **Biometria Comportamental Nativa (NDK `ASensorManager`):**
-   - Coleta de giroscópio e acelerômetro ativada em thread de alta resolução (50Hz) **apenas durante a janela de toque na tela**.
-   - Algoritmo online de Welford calculando variância de micro-tremores em $O(1)$ de memória para gerar `bot_likelihood_score` ($0..255$) e `duress_tremor_index` ($0..255$).
+4. **Native Behavioral Biometrics & Duress Detection (NDK `ASensorManager`):**
+   - Samples accelerometer and gyroscope directly in C++ via NDK `ASensorManager` / `ASensorEventQueue` (50 Hz) **only during active touch windows** for minimal battery overhead and immunity to Java-layer hooks.
+   - Uses Welford's online algorithm in $O(1)$ memory to compute micro-tremor variance, touch pressure variance, and tap cadence regularity, producing `bot_likelihood_score` (`0..255`) and `duress_tremor_index` (`0..255`).
 
-5. **Decepção Cibernética Ativa (Honeypots):**
-   - Classes-isca tentadoras para engenharia reversa (`DebugSecurityOverride.disableSslPinning()`, etc.) que acionam silenciosamente o kernel nativo gravando `FLAG_HONEYPOT_TRIGGERED` sem emitir erros ou fechar o app.
+5. **Active Cyber Deception (Internal Honeypots):**
+   - High-value decoy classes and methods (`DebugSecurityOverride.disableSslPinning()`, `bypassRootChecks()`, `exportMasterSeed()`, `setDebugMode()`, `allowAllCertificates()`) that silently record `FLAG_HONEYPOT_TRIGGERED` in atomic native memory without throwing errors or crashing.
 
 ---
 
-## 📦 Instalação via Gradle (JitPack)
+## 📦 Installation via Gradle (JitPack)
 
-### 1. Adicione o repositório JitPack no seu `settings.gradle.kts`:
+### 1. Add the JitPack repository to `settings.gradle.kts`:
 ```kotlin
 dependencyResolutionManagement {
     repositories {
@@ -80,21 +80,21 @@ dependencyResolutionManagement {
 }
 ```
 
-### 2. Adicione a dependência no `build.gradle.kts` do seu módulo de aplicativo:
+### 2. Add the dependency to your app module's `build.gradle.kts`:
 ```kotlin
 dependencies {
     implementation("com.github.Maignardi:MaigShield:v1.0.0")
-    
-    // OkHttp (opcional, caso utilize o Interceptor de rede do MaigShield)
+
+    // OkHttp (optional, required if using MaigShieldInterceptor)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
 ```
 
 ---
 
-## 🚀 Como Usar
+## 🚀 Quick Start
 
-### 1. Inicialize o SDK na sua `Application`
+### 1. Initialize the SDK in your `Application` class
 ```kotlin
 class SampleBankApp : Application() {
     override fun onCreate() {
@@ -119,28 +119,28 @@ class SampleBankApp : Application() {
 }
 ```
 
-### 2. Registre o Interceptor no OkHttp
+### 2. Attach the OkHttp Interceptor
 ```kotlin
 val okHttpClient = OkHttpClient.Builder()
-    .addInterceptor(MaigShieldInterceptor()) // Anexa X-MaigShield-Proof em rotas protegidas
+    .addInterceptor(MaigShieldInterceptor()) // Attaches X-MaigShield-Proof on protected paths
     .build()
 ```
 
 ---
 
-## 🔬 App de Demonstração e Diagnóstico Local
+## 🔬 Sample App & Local Diagnostics
 
-O projeto inclui um aplicativo de demonstração (`app/`) com:
-- Simulação de transferência Pix protegida com geração de token em tempo real.
-- Botão de simulação de ataque Honeypot (Frida Decoy).
-- Painel de diagnóstico que descriptografa e desembaralha as canary flags em tempo real usando chave privada de teste.
+The repository includes a sample application (`app/`) featuring:
+- A simulated payment transfer flow generating real-time `X-MaigShield-Proof` tokens.
+- An interactive Honeypot simulation button (mimicking a Frida decoy hook).
+- A local Telemetry & Diagnostics Panel that decrypts and unscrambles the 64-bit canary bitmask in real time using a test RSA private key.
 
-Para compilar e testar localmente:
+To build the library, sample app, and run all unit tests locally:
 ```bash
-./gradlew :maigshield:assembleDebug :app:assembleDebug
+./gradlew :maigshield:assembleDebug :app:assembleDebug :maigshield:test
 ```
 
 ---
 
-## 📄 Licença
-Distribuído sob a licença Apache 2.0. Veja `LICENSE` para mais detalhes.
+## 📄 License
+Distributed under the Apache 2.0 License. See `LICENSE` for details.

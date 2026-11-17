@@ -10,6 +10,7 @@
 #if defined(__aarch64__)
     #define SYS_OPENAT_NR        56
     #define SYS_CLOSE_NR         57
+    #define SYS_GETDENTS64_NR    61
     #define SYS_READ_NR          63
     #define SYS_CLOCK_GETTIME_NR 113
     #define SYS_PTRACE_NR        117
@@ -17,6 +18,7 @@
     #define SYS_READ_NR          0
     #define SYS_CLOSE_NR         3
     #define SYS_PTRACE_NR        101
+    #define SYS_GETDENTS64_NR    217
     #define SYS_CLOCK_GETTIME_NR 228
     #define SYS_OPENAT_NR        257
 #endif
@@ -156,6 +158,42 @@ inline long sys_ptrace(long request, pid_t pid, void* addr, void* data) noexcept
     return ret;
 #else
     return ::ptrace(static_cast<__ptrace_request>(request), pid, addr, data);
+#endif
+}
+
+struct linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[];
+};
+
+inline long sys_getdents64(int fd, void* dirp, unsigned int count) noexcept {
+#if defined(__aarch64__)
+    register long x8 __asm__("x8") = SYS_GETDENTS64_NR;
+    register long x0 __asm__("x0") = fd;
+    register long x1 __asm__("x1") = reinterpret_cast<long>(dirp);
+    register long x2 __asm__("x2") = static_cast<long>(count);
+    __asm__ volatile (
+        "svc #0"
+        : "+r"(x0)
+        : "r"(x8), "r"(x1), "r"(x2)
+        : "memory", "cc"
+    );
+    return x0;
+#elif defined(__x86_64__)
+    long ret;
+    __asm__ volatile (
+        "syscall"
+        : "=a"(ret)
+        : "a"(SYS_GETDENTS64_NR), "D"(fd), "S"(dirp), "d"(count)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+#else
+    (void)fd; (void)dirp; (void)count;
+    return -1;
 #endif
 }
 

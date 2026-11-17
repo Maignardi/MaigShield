@@ -60,6 +60,8 @@ class HybridCryptoEnvelopeTest {
         val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
         val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
         aesCipher.init(Cipher.ENCRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+        aesCipher.updateAAD(byteArrayOf(1))
+        aesCipher.updateAAD(encapsulatedKey)
         val ciphertext = aesCipher.doFinal(rawEnvelope)
 
         val mockSignature = ByteArray(64) { 0x5A.toByte() }

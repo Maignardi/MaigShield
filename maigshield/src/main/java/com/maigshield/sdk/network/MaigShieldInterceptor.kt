@@ -32,12 +32,16 @@ class MaigShieldInterceptor : Interceptor {
         }
 
         val bodyBytes = request.body?.let { requestBody ->
-            try {
-                val buffer = Buffer()
-                requestBody.writeTo(buffer)
-                buffer.readByteArray()
-            } catch (_: Exception) {
+            if (requestBody.isOneShot() || requestBody.isDuplex()) {
                 null
+            } else {
+                try {
+                    val buffer = Buffer()
+                    requestBody.writeTo(buffer)
+                    buffer.readByteArray()
+                } catch (_: Exception) {
+                    null
+                }
             }
         }
 
