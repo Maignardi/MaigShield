@@ -2,13 +2,21 @@ package com.maigshield.sdk.network
 
 import com.maigshield.sdk.MaigShield
 import okhttp3.Interceptor
+import okhttp3.Request
 import okhttp3.Response
 import okio.Buffer
 import java.io.IOException
+import java.lang.reflect.Method
 
 /**
  * OkHttp Interceptor that binds outgoing HTTP requests with cryptographic
  * MaigShield zero-boolean proof tokens.
+ *
+ * Endpoints are protected automatically when:
+ * 1. Their Retrofit method is annotated with `@MaigShieldProtected`, OR
+ * 2. Their URL path matches any prefix from `AndroidManifest.xml` `<meta-data>`,
+ *    `MaigShield.registerProtectedPaths(...)`, or `MaigShieldConfig.protectedPaths`, OR
+ * 3. No protected paths are configured at all (protects all requests by default).
  */
 class MaigShieldInterceptor : Interceptor {
 
@@ -23,10 +31,13 @@ class MaigShieldInterceptor : Interceptor {
         }
 
         val path = request.url.encodedPath
-        val protectedPaths = maigShield.config.protectedPaths
+        val protectedPaths = maigShield.getEffectiveProtectedPaths()
+        val isAnnotated = hasProtectedAnnotation(request)
 
-        // If protectedPaths is specified and current path is not protected, proceed
-        val isProtected = protectedPaths.isEmpty() || protectedPaths.any { path.startsWith(it) }
+        val isProtected = isAnnotated ||
+            protectedPaths.isEmpty() ||
+            protectedPaths.any { path.startsWith(it) }
+
         if (!isProtected) {
             return chain.proceed(request)
         }
@@ -56,6 +67,18 @@ class MaigShieldInterceptor : Interceptor {
             .build()
 
         return chain.proceed(newRequest)
+    }
+
+    internal fun hasProtectedAnnotation(request: Request): Boolean {
+        return try {
+            val invocationClass = Class.forName("retrofit2.Invocation")
+            val invocation = request.tag(invocationClass) ?: return false
+            val methodGetter: Method = invocationClass.getMethod("method")
+            val serviceMethod = methodGetter.invoke(invocation) as? Method ?: return false
+            serviceMethod.isAnnotationPresent(MaigShieldProtected::class.java)
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     companion object {

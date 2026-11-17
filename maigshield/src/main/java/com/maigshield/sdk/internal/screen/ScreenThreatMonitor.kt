@@ -9,9 +9,12 @@ import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 internal class ScreenThreatMonitor(
@@ -23,8 +26,13 @@ internal class ScreenThreatMonitor(
 ) : Application.ActivityLifecycleCallbacks {
 
     private val accumulatedFlags = AtomicLong(0L)
-    private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-    private val accessibilityManager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    private val warmedUp = AtomicBoolean(false)
+    private val displayManager by lazy {
+        context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+    }
+    private val accessibilityManager by lazy {
+        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    }
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {
@@ -40,9 +48,12 @@ internal class ScreenThreatMonitor(
         }
     }
 
-    init {
+    fun warmUp() {
+        if (!warmedUp.compareAndSet(false, true)) return
         if (enableScreenMirrorCheck) {
-            displayManager?.registerDisplayListener(displayListener, null)
+            try {
+                displayManager?.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+            } catch (_: Throwable) {}
             checkActiveDisplays()
         }
         if (enableAccessibilityCheck) {

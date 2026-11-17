@@ -13,8 +13,16 @@
     public *;
 }
 
+-keep public enum com.maigshield.sdk.WarmUpMode {
+    public *;
+}
+
 -keep public class com.maigshield.sdk.network.MaigShieldInterceptor {
     public *;
+}
+
+-keep @interface com.maigshield.sdk.network.MaigShieldProtected {
+    *;
 }
 
 # Preserve Native Bridge and JNI bindings

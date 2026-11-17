@@ -42,4 +42,29 @@ class MaigShieldConfigTest {
             .setServerPublicKeyPem("   ")
             .build()
     }
+
+    @Test
+    fun warmUpMode_defaults_to_background_async_and_supports_lazy() {
+        val defaultCfg = MaigShieldConfig.Builder()
+            .setServerPublicKeyPem(sampleRsaPem)
+            .build()
+        assertEquals(WarmUpMode.BACKGROUND_ASYNC, defaultCfg.warmUpMode)
+
+        val lazyCfg = MaigShieldConfig.Builder()
+            .setServerPublicKeyPem(sampleRsaPem)
+            .setWarmUpMode(WarmUpMode.LAZY_ON_DEMAND)
+            .build()
+        assertEquals(WarmUpMode.LAZY_ON_DEMAND, lazyCfg.warmUpMode)
+    }
+
+    @Test
+    fun modular_protected_paths_register_and_deduplicate() {
+        MaigShield.clearRegisteredModularPathsForTest()
+        MaigShield.registerProtectedPaths(" /api/v1/pix ", "", "  ", "/api/v1/auth")
+        MaigShield.registerProtectedPaths("/api/v1/pix", "/api/v1/cards")
+
+        val registered = MaigShield.getRegisteredModularPaths()
+        assertEquals(setOf("/api/v1/pix", "/api/v1/auth", "/api/v1/cards"), registered)
+        MaigShield.clearRegisteredModularPathsForTest()
+    }
 }

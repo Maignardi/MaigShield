@@ -15,6 +15,7 @@ import java.nio.ByteOrder
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.SecureRandom
@@ -38,8 +39,10 @@ class StrongBoxSigner internal constructor(
     private val enforceAttestation: Boolean = true
 ) {
 
-    private val keyStore: KeyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
-        load(null)
+    private val keyStore: KeyStore by lazy {
+        KeyStore.getInstance(KEYSTORE_PROVIDER).apply {
+            load(null)
+        }
     }
 
     private val bankPublicKey: PublicKey by lazy {
@@ -49,8 +52,10 @@ class StrongBoxSigner internal constructor(
     private val secureRandom = SecureRandom()
     private val keyGenLock = Any()
 
-    init {
+    fun warmUp() {
         ensureAttestationKeyExists()
+        // Trigger lazy parsing of bankPublicKey on background thread
+        bankPublicKey
     }
 
     private fun ensureAttestationKeyExists() {
@@ -111,11 +116,26 @@ class StrongBoxSigner internal constructor(
     }
 
     fun getAttestationCertificateChain(): List<Certificate> {
+        ensureAttestationKeyExists()
         val chain = keyStore.getCertificateChain(KEY_ALIAS)
         return chain?.toList() ?: emptyList()
     }
 
+    /**
+     * Returns a stable SHA-256 fingerprint of this installation's hardware-backed
+     * ECDSA public key. Unlike ANDROID_ID/device_id, this identifier is bound
+     * cryptographically to the keypair itself (which is naturally rotated on factory reset).
+     */
+    fun getAttestationKeyId(): String {
+        ensureAttestationKeyExists()
+        val pubKey = keyStore.getCertificate(KEY_ALIAS)?.publicKey
+            ?: throw IllegalStateException("Hardware attestation certificate missing in Keystore")
+        val digest = MessageDigest.getInstance("SHA-256").digest(pubKey.encoded)
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
     fun signAndEncryptEnvelope(rawEnvelope: ByteArray): String {
+        ensureAttestationKeyExists()
         // 1. Generate ephemeral 256-bit AES key
         val keyGen = KeyGenerator.getInstance("AES")
         keyGen.init(256, secureRandom)

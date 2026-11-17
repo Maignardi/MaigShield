@@ -1,6 +1,7 @@
 package com.maigshield.sdk
 
 import com.maigshield.sdk.network.MaigShieldInterceptor
+import com.maigshield.sdk.network.MaigShieldProtected
 import okhttp3.Call
 import okhttp3.Connection
 import okhttp3.Interceptor
@@ -22,6 +23,21 @@ class MaigShieldInterceptorTest {
     @Test
     fun test_header_constant_matches_protocol_spec() {
         assertEquals("X-MaigShield-Proof", MaigShieldInterceptor.HEADER_PROOF)
+    }
+
+    @Test
+    fun test_maigshield_protected_annotation_is_retained_at_runtime() {
+        val method = SampleProtectedApi::class.java.getDeclaredMethod("protectedTransfer")
+        val unprotected = SampleProtectedApi::class.java.getDeclaredMethod("publicConfig")
+        assertEquals(true, method.isAnnotationPresent(MaigShieldProtected::class.java))
+        assertEquals(false, unprotected.isAnnotationPresent(MaigShieldProtected::class.java))
+    }
+
+    private interface SampleProtectedApi {
+        @MaigShieldProtected
+        fun protectedTransfer()
+
+        fun publicConfig()
     }
 
     @Test

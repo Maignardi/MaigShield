@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Base64
 import com.maigshield.sdk.MaigShield
 import com.maigshield.sdk.MaigShieldConfig
+import com.maigshield.sdk.WarmUpMode
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.PrivateKey
@@ -19,10 +20,13 @@ class SampleBankApp : Application() {
         val publicKeyPem = exportPublicKeyToPem(testKeyPair)
         sTestPublicKeyPem = publicKeyPem
 
-        // Initialize MaigShield SDK
+        // Feature modules can register their own protected routes independently
+        MaigShield.registerProtectedPaths("/api/v1/pix/transfer", "/api/v1/account")
+
+        // Initialize MaigShield SDK with non-blocking background warm-up (zero TTFF/TTFI impact)
         val config = MaigShieldConfig.Builder()
             .setServerPublicKeyPem(publicKeyPem)
-            .setProtectedPaths(listOf("/api/v1/pix/transfer", "/api/v1/account"))
+            .setWarmUpMode(WarmUpMode.BACKGROUND_ASYNC)
             .setEnableStrongBox(true)
             .setEnforceHardwareAttestation(true)
             .setEnableScreenThreatDetection(true)

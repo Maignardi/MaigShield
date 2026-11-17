@@ -137,7 +137,7 @@ Add the dependency to your module's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Maignardi:MaigShield:v1.0.2")
+    implementation("com.github.Maignardi:MaigShield:v1.0.3")
 
     // Required only if using MaigShieldInterceptor
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -148,9 +148,9 @@ dependencies {
 
 ## Integration Guide & Usage Patterns
 
-### Option A: Automatic Protection with OkHttp / Retrofit (Recommended)
+### Option A: Zero-TTFF Startup & Decentralized Endpoint Protection (Recommended)
 
-Initialize MaigShield once in `Application.onCreate()` so `ActivityLifecycleCallbacks` and native sensor monitors are active from app launch:
+`MaigShield.initialize()` registers only lightweight `ActivityLifecycleCallbacks` on the calling thread and dispatches native `.so` loading, `AndroidKeyStore`/StrongBox key generation, and initial system scans to a background IO coroutine (`WarmUpMode.BACKGROUND_ASYNC` by default, or `WarmUpMode.LAZY_ON_DEMAND` to defer until first use). **Zero impact on cold-start TTFF/TTFI.**
 
 ```kotlin
 class SampleBankApp : Application() {
@@ -163,7 +163,7 @@ class SampleBankApp : Application() {
                 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
                 -----END PUBLIC KEY-----
             """.trimIndent())
-            .setProtectedPaths(listOf("/api/v1/pix", "/api/v1/auth", "/api/v1/transfers"))
+            .setWarmUpMode(WarmUpMode.BACKGROUND_ASYNC) // or WarmUpMode.LAZY_ON_DEMAND
             .setEnableStrongBox(true)
             .setEnforceHardwareAttestation(true)
             .setEnableScreenThreatDetection(true)
@@ -177,7 +177,32 @@ class SampleBankApp : Application() {
 }
 ```
 
-Attach `MaigShieldInterceptor` to your `OkHttpClient` (works seamlessly with Retrofit):
+Instead of hardcoding every endpoint in `Application.onCreate()`, protect routes using any combination of:
+
+1. **Retrofit Method Annotation (Per-Endpoint, Zero Central Config):**
+   ```kotlin
+   interface PixApi {
+       @MaigShieldProtected
+       @POST("/api/v1/pix/transfer")
+       suspend fun transfer(@Body req: TransferRequest): Response<Unit>
+   }
+   ```
+2. **Feature-Module Registration (Multi-Module Apps):**
+   ```kotlin
+   // Inside :feature-pix DI / initializer, before or after MaigShield.initialize()
+   MaigShield.registerProtectedPaths("/api/v1/pix", "/api/v1/transfers")
+   ```
+3. **`AndroidManifest.xml` `<meta-data>` Schema (Comma-Separated or `@array` Resource):**
+   ```xml
+   <application ...>
+       <meta-data
+           android:name="com.maigshield.sdk.PROTECTED_PATHS"
+           android:value="/api/v1/pix,/api/v1/auth" />
+       <!-- Or reference a string-array: android:resource="@array/maigshield_protected_paths" -->
+   </application>
+   ```
+
+Attach `MaigShieldInterceptor` to your `OkHttpClient`:
 
 ```kotlin
 val okHttpClient = OkHttpClient.Builder()
@@ -185,7 +210,7 @@ val okHttpClient = OkHttpClient.Builder()
     .build()
 ```
 
-Every request whose path starts with an entry in `protectedPaths` (or all requests if `protectedPaths` is empty) automatically receives the `X-MaigShield-Proof` header. One-shot and duplex streaming bodies are left untouched so uploads are never consumed prematurely.
+One-shot and duplex streaming bodies are left untouched so uploads are never consumed prematurely.
 
 ---
 
@@ -208,17 +233,18 @@ suspend fun submitTransfer(payloadJson: String) = withContext(Dispatchers.IO) {
 
 ---
 
-### Option C: Hardware Key Attestation Enrollment (Onboarding / Login)
+### Option C: Hardware Key Attestation Enrollment (Key-Bound, Reset-Safe)
 
-During device registration or login, export the Android Keystore X.509 certificate chain so your backend can verify that the ECDSA P-256 signing key lives in genuine StrongBox/TEE hardware and inspect Verified Boot state:
+> **Why not `device_id` / `ANDROID_ID`?** On modern Android, `ANDROID_ID` changes on factory reset, and Android Keystore wipes hardware keys on factory reset as well. Instead of treating a mutable `device_id` as permanent identity, bind attestation records to the **cryptographic key fingerprint (`keyId`) + authenticated `userId` / `sessionId`**. If a user factory-resets or switches devices, they naturally enroll a new hardware-attested keypair during MFA/onboarding.
 
 ```kotlin
-val certChainBase64: List<String> = MaigShield.getInstance()
-    .getAttestationCertificateChain()
+val shield = MaigShield.getInstance()
+val keyId: String = shield.getAttestationKeyId() // SHA-256 hex of attested ECDSA public key
+val certChainBase64: List<String> = shield.getAttestationCertificateChain()
     .map { cert -> Base64.getEncoder().encodeToString(cert.encoded) }
 ```
 
-Your server validates this chain up to the Google Hardware Attestation Root CA and pins the leaf public key to the user's `device_id`.
+Your server validates the X.509 chain up to the Google Hardware Attestation Root CA and associates `keyId` (and its leaf public key) with the user's active device enrollment.
 
 ---
 

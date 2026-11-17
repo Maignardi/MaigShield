@@ -1,6 +1,24 @@
 package com.maigshield.sdk
 
 /**
+ * Controls when heavy native/keystore initialization runs relative to Application.onCreate().
+ */
+enum class WarmUpMode {
+    /**
+     * Registers lightweight lifecycle callbacks immediately on the calling thread and
+     * dispatches native library loading, AndroidKeyStore/StrongBox setup, and initial
+     * environment scans to a background IO thread. Zero impact on TTFF/TTFI.
+     */
+    BACKGROUND_ASYNC,
+
+    /**
+     * Defers native library loading and AndroidKeyStore/StrongBox initialization until
+     * the first protected request (`mintProofToken()`) or explicit `warmUp()` call.
+     */
+    LAZY_ON_DEMAND
+}
+
+/**
  * Immutable configuration for MaigShield SDK.
  */
 data class MaigShieldConfig(
@@ -11,7 +29,8 @@ data class MaigShieldConfig(
     val enableScreenThreatDetection: Boolean = true,
     val enableTapjackingProtection: Boolean = true,
     val enableBehavioralBiometrics: Boolean = true,
-    val allowDebuggable: Boolean = false
+    val allowDebuggable: Boolean = false,
+    val warmUpMode: WarmUpMode = WarmUpMode.BACKGROUND_ASYNC
 ) {
     class Builder {
         private var serverPublicKeyPem: String = ""
@@ -22,6 +41,7 @@ data class MaigShieldConfig(
         private var enableTapjackingProtection: Boolean = true
         private var enableBehavioralBiometrics: Boolean = true
         private var allowDebuggable: Boolean = false
+        private var warmUpMode: WarmUpMode = WarmUpMode.BACKGROUND_ASYNC
 
         fun setServerPublicKeyPem(pem: String): Builder = apply {
             this.serverPublicKeyPem = pem
@@ -55,6 +75,10 @@ data class MaigShieldConfig(
             this.allowDebuggable = allow
         }
 
+        fun setWarmUpMode(mode: WarmUpMode): Builder = apply {
+            this.warmUpMode = mode
+        }
+
         fun build(): MaigShieldConfig {
             require(serverPublicKeyPem.isNotBlank()) {
                 "serverPublicKeyPem must be configured with the Bank's Public Key PEM."
@@ -67,7 +91,8 @@ data class MaigShieldConfig(
                 enableScreenThreatDetection = enableScreenThreatDetection,
                 enableTapjackingProtection = enableTapjackingProtection,
                 enableBehavioralBiometrics = enableBehavioralBiometrics,
-                allowDebuggable = allowDebuggable
+                allowDebuggable = allowDebuggable,
+                warmUpMode = warmUpMode
             )
         }
     }
