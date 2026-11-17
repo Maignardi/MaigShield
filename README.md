@@ -146,9 +146,11 @@ dependencies {
 
 ---
 
-## Usage
+## Integration Guide & Usage Patterns
 
-### 1. Initialize in `Application.onCreate()`
+### Option A: Automatic Protection with OkHttp / Retrofit (Recommended)
+
+Initialize MaigShield once in `Application.onCreate()` so `ActivityLifecycleCallbacks` and native sensor monitors are active from app launch:
 
 ```kotlin
 class SampleBankApp : Application() {
@@ -167,7 +169,7 @@ class SampleBankApp : Application() {
             .setEnableScreenThreatDetection(true)
             .setEnableTapjackingProtection(true)
             .setEnableBehavioralBiometrics(true)
-            .setAllowDebuggable(false)
+            .setAllowDebuggable(BuildConfig.DEBUG)
             .build()
 
         MaigShield.initialize(this, config)
@@ -175,15 +177,67 @@ class SampleBankApp : Application() {
 }
 ```
 
-### 2. Attach `MaigShieldInterceptor` to `OkHttpClient`
+Attach `MaigShieldInterceptor` to your `OkHttpClient` (works seamlessly with Retrofit):
 
 ```kotlin
-val client = OkHttpClient.Builder()
+val okHttpClient = OkHttpClient.Builder()
     .addInterceptor(MaigShieldInterceptor())
     .build()
 ```
 
-For manual usage (e.g., Retrofit/Ktor/custom stacks), call `MaigShield.getInstance().mintProofToken(method, path, bodyBytes)` and send the returned string in the `X-MaigShield-Proof` header. To enroll or verify device hardware trust on login/onboarding, export the X.509 attestation chain via `MaigShield.getInstance().getAttestationCertificateChain()`.
+Every request whose path starts with an entry in `protectedPaths` (or all requests if `protectedPaths` is empty) automatically receives the `X-MaigShield-Proof` header. One-shot and duplex streaming bodies are left untouched so uploads are never consumed prematurely.
+
+---
+
+### Option B: Manual Integration (Ktor, Volley, gRPC, or Custom Stacks)
+
+If you do not use OkHttp, mint the proof token directly on a background thread (`Dispatchers.IO`) and attach it as an HTTP header:
+
+```kotlin
+suspend fun submitTransfer(payloadJson: String) = withContext(Dispatchers.IO) {
+    val bodyBytes = payloadJson.toByteArray(Charsets.UTF_8)
+    val proof = MaigShield.getInstance().mintProofToken(
+        httpMethod = "POST",
+        urlPath = "/api/v1/transfers",
+        requestBody = bodyBytes
+    )
+
+    // Send `proof` in header: X-MaigShield-Proof: <proof>
+}
+```
+
+---
+
+### Option C: Hardware Key Attestation Enrollment (Onboarding / Login)
+
+During device registration or login, export the Android Keystore X.509 certificate chain so your backend can verify that the ECDSA P-256 signing key lives in genuine StrongBox/TEE hardware and inspect Verified Boot state:
+
+```kotlin
+val certChainBase64: List<String> = MaigShield.getInstance()
+    .getAttestationCertificateChain()
+    .map { cert -> Base64.getEncoder().encodeToString(cert.encoded) }
+```
+
+Your server validates this chain up to the Google Hardware Attestation Root CA and pins the leaf public key to the user's `device_id`.
+
+---
+
+### Option D: Observing Proof Generation & Behavioral Telemetry
+
+Register a `TelemetryObserver` for audit logging or analytics pipelines, or query the native behavioral scores directly (e.g., to trigger client-side UX step-up prompts without exposing boolean checks):
+
+```kotlin
+val shield = MaigShield.getInstance()
+
+shield.addTelemetryObserver(object : MaigShield.TelemetryObserver {
+    override fun onTokenMinted(proofToken: String) {
+        // Optional telemetry hook (token is already encrypted & signed)
+    }
+})
+
+val botLikelihood: Int = shield.getBotScore()     // 0..255
+val duressIndex: Int = shield.getDuressScore()    // 0..255
+```
 
 ---
 
@@ -194,7 +248,69 @@ For manual usage (e.g., Retrofit/Ktor/custom stacks), call `MaigShield.getInstan
 3. Decrypt `encapsulated_key` with the server's RSA private key (`RSA/ECB/OAEPWithSHA-256AndMGF1Padding`).
 4. Decrypt `ciphertext` using AES-256-GCM with AAD = `protocol_version || encapsulated_key`.
 5. Validate `magic == 0x4D414947`, verify `crc32`, check `monotonic_counter` > last seen counter for this device, and verify `request_binding_hash` matches `SHA-256(METHOD || URL_PATH || SHA-256(BODY))`.
-6. Unscramble `scrambled_canary_flags` using the known build `code_checksum`, `salt`, and `monotonic_timestamp_ns`, then evaluate risk policy using the flags alongside `bot_likelihood_score` and `duress_tremor_index`.
+6. Unscramble `scrambled_canary_flags` using the known build `code_checksum`, `salt`, and `monotonic_timestamp_ns`.
+
+### Reference Verifier Snippet (Server-Side Kotlin / JVM)
+
+```kotlin
+fun verifyAndDecryptProof(
+    proofHeader: String,
+    serverRsaPrivateKey: PrivateKey,
+    deviceAttestedEcPublicKey: PublicKey
+): ByteArray {
+    val raw = Base64.getUrlDecoder().decode(proofHeader)
+    val dis = DataInputStream(ByteArrayInputStream(raw))
+
+    val version = dis.readByte()
+    val encKey = ByteArray(dis.readShort().toInt() and 0xFFFF).also { dis.readFully(it) }
+    val iv = ByteArray(12).also { dis.readFully(it) }
+    val ciphertext = ByteArray(dis.readInt()).also { dis.readFully(it) }
+    val signature = ByteArray(dis.readShort().toInt() and 0xFFFF).also { dis.readFully(it) }
+
+    // 1. Verify StrongBox/TEE hardware signature
+    val sig = Signature.getInstance("SHA256withECDSA").apply {
+        initVerify(deviceAttestedEcPublicKey)
+        update(version)
+        update(encKey)
+        update(iv)
+        update(ciphertext)
+    }
+    require(sig.verify(signature)) { "Invalid hardware ECDSA signature" }
+
+    // 2. Decapsulate ephemeral AES-256 key
+    val oaep = OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+    val rsa = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding").apply {
+        init(Cipher.DECRYPT_MODE, serverRsaPrivateKey, oaep)
+    }
+    val aesKey = SecretKeySpec(rsa.doFinal(encKey), "AES")
+
+    // 3. Decrypt & authenticate 76-byte TelemetryEnvelope
+    val gcm = Cipher.getInstance("AES/GCM/NoPadding").apply {
+        init(Cipher.DECRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+        updateAAD(byteArrayOf(version))
+        updateAAD(encKey)
+    }
+    return gcm.doFinal(ciphertext) // Parse 76-byte little-endian struct next
+}
+```
+
+### Recommended Risk Policy Matrix
+
+| Signal Combination | Suggested Backend Action |
+| :--- | :--- |
+| `FLAG_HONEYPOT_TRIGGERED` or `FLAG_FRIDA_AGENT_MAPPED` or `FLAG_JNI_TABLE_HOOKED` | **Silent Reject / Quarantine** — return generic error or hold transaction for fraud review. |
+| `FLAG_ACCESSIBILITY_ABUSE` + `FLAG_SCREEN_MIRRORING` during payment | **Block & Notify** — high probability of active banking trojan / RAT session. |
+| `duress_tremor_index >= 120` or `FLAG_TAPJACKING_DETECTED` | **Step-Up MFA** — require biometric liveness / out-of-band confirmation. |
+| `bot_likelihood_score >= 120` or `FLAG_SYNTHETIC_TOUCH_DETECTED` | **Rate-Limit / Challenge** — flag automated scripting or emulator farm. |
+| `monotonic_counter <= last_seen` or `request_binding_hash` mismatch | **Hard Reject (HTTP 403)** — replay attack or MITM payload tampering. |
+
+---
+
+## R8 / ProGuard & Troubleshooting
+
+- **R8 / ProGuard:** `consumer-rules.pro` is bundled inside the `.aar` and automatically keeps public APIs, `NativeBridge` JNI methods, and `DebugSecurityOverride` honeypot classes intact.
+- **Emulators & Devices Without StrongBox:** When `setEnableStrongBox(true)` is set on devices lacking a dedicated StrongBox chip, `StrongBoxSigner` automatically falls back to hardware-backed TEE without throwing.
+- **Debug Builds:** Set `.setAllowDebuggable(BuildConfig.DEBUG)` during development so `FLAG_DEBUGGABLE_APP` is only flagged in tampered release builds.
 
 ---
 
