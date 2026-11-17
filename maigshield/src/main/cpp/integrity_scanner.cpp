@@ -4,10 +4,10 @@
 
 #include <cstring>
 #include <fcntl.h>
+#include <mutex>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <link.h>
-#include <dirent.h>
 #include <sys/types.h>
 
 namespace maigshield::integrity {
@@ -29,10 +29,20 @@ uint64_t IntegrityScanner::get_honeypot_mask() {
 }
 
 bool IntegrityScanner::check_ptrace_seal() {
-    // Attempt PTRACE_TRACEME via direct kernel syscall
-    // If a debugger (GDB, LLDB, Frida) is attached, the syscall fails with -1 (EPERM)
-    long ret = sys::sys_ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
-    return ret < 0;
+    // PTRACE_TRACEME can only succeed once per process lifecycle.
+    // Sealing once prevents false positives (-EPERM) on subsequent scans while
+    // permanently recording if a debugger had already attached before init.
+    static std::once_flag s_seal_once;
+    static std::atomic<bool> s_seal_failed{false};
+
+    std::call_once(s_seal_once, []() {
+        long ret = sys::sys_ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
+        if (ret < 0) {
+            s_seal_failed.store(true, std::memory_order_relaxed);
+        }
+    });
+
+    return s_seal_failed.load(std::memory_order_relaxed);
 }
 
 bool IntegrityScanner::check_tracer_pid() {
@@ -220,22 +230,46 @@ bool IntegrityScanner::scan_mounts() {
     OBFUSCATE_STACK(kw_magisk, "magisk");
     OBFUSCATE_STACK(kw_core, "core/mirror");
     OBFUSCATE_STACK(kw_ksu, "kernel_su");
-    OBFUSCATE_STACK(kw_ksu_alt, "ksu");
+    OBFUSCATE_STACK(kw_kernelsu, "kernelsu");
+    OBFUSCATE_STACK(kw_ksu_slash, "/ksu");
     OBFUSCATE_STACK(kw_apatch, "apatch");
 
-    char buffer[2048];
+    char chunk[2048];
+    char line[1024];
+    size_t line_pos = 0;
     long n = 0;
     bool detected = false;
 
-    while ((n = sys::sys_read(static_cast<int>(fd), buffer, sizeof(buffer) - 1)) > 0) {
-        buffer[n] = '\0';
-        if (strstr(buffer, kw_magisk.c_str()) ||
-            strstr(buffer, kw_core.c_str()) ||
-            strstr(buffer, kw_ksu.c_str()) ||
-            strstr(buffer, kw_ksu_alt.c_str()) ||
-            strstr(buffer, kw_apatch.c_str())) {
+    while (!detected && (n = sys::sys_read(static_cast<int>(fd), chunk, sizeof(chunk))) > 0) {
+        for (long i = 0; i < n; ++i) {
+            char c = chunk[i];
+            if (c == '\n' || line_pos >= sizeof(line) - 1) {
+                line[line_pos] = '\0';
+                if (strstr(line, kw_magisk.c_str()) ||
+                    strstr(line, kw_core.c_str()) ||
+                    strstr(line, kw_ksu.c_str()) ||
+                    strstr(line, kw_kernelsu.c_str()) ||
+                    strstr(line, kw_ksu_slash.c_str()) ||
+                    strstr(line, kw_apatch.c_str())) {
+                    detected = true;
+                    break;
+                }
+                line_pos = 0;
+            } else {
+                line[line_pos++] = c;
+            }
+        }
+    }
+
+    if (!detected && line_pos > 0) {
+        line[line_pos] = '\0';
+        if (strstr(line, kw_magisk.c_str()) ||
+            strstr(line, kw_core.c_str()) ||
+            strstr(line, kw_ksu.c_str()) ||
+            strstr(line, kw_kernelsu.c_str()) ||
+            strstr(line, kw_ksu_slash.c_str()) ||
+            strstr(line, kw_apatch.c_str())) {
             detected = true;
-            break;
         }
     }
 

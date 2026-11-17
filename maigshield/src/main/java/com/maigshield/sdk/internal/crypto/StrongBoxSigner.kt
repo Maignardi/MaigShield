@@ -130,7 +130,9 @@ class StrongBoxSigner internal constructor(
             PSource.PSpecified.DEFAULT
         )
         rsaCipher.init(Cipher.ENCRYPT_MODE, bankPublicKey, oaepParams)
-        val encapsulatedKey = rsaCipher.doFinal(ephemeralAesKey.encoded)
+        val rawAesBytes = ephemeralAesKey.encoded
+        val encapsulatedKey = rsaCipher.doFinal(rawAesBytes)
+        rawAesBytes.fill(0)
 
         // 3. Encrypt raw binary envelope using AES-256-GCM with AAD binding
         val iv = ByteArray(GCM_IV_LENGTH).apply {
@@ -144,12 +146,13 @@ class StrongBoxSigner internal constructor(
         val ciphertext = aesCipher.doFinal(rawEnvelope)
         rawEnvelope.fill(0)
 
-        // 4. Sign (EncapsulatedKey + IV + Ciphertext) via StrongBox / TEE ECDSA
+        // 4. Sign (Version + EncapsulatedKey + IV + Ciphertext) via StrongBox / TEE ECDSA
         val privateKey = keyStore.getKey(KEY_ALIAS, null) as? PrivateKey
             ?: throw IllegalStateException("Hardware signing key missing in Keystore")
 
         val signatureEngine = Signature.getInstance("SHA256withECDSA")
         signatureEngine.initSign(privateKey)
+        signatureEngine.update(PROOF_PROTOCOL_VERSION.toByte())
         signatureEngine.update(encapsulatedKey)
         signatureEngine.update(iv)
         signatureEngine.update(ciphertext)

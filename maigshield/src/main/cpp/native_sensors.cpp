@@ -51,13 +51,15 @@ bool NativeSensorCollector::initialize(const char* package_name) {
 }
 
 void NativeSensorCollector::shutdown() {
-    if (!m_running.load()) {
+    if (!m_running.exchange(false)) {
         return;
     }
 
-    m_running.store(false);
-    if (m_looper) {
-        ALooper_wake(m_looper);
+    {
+        std::lock_guard<std::mutex> lock(m_sensor_mutex);
+        if (m_looper) {
+            ALooper_wake(m_looper);
+        }
     }
 
     if (m_worker_thread.joinable()) {
@@ -67,7 +69,8 @@ void NativeSensorCollector::shutdown() {
 
 void NativeSensorCollector::start_sampling_window() {
     m_in_touch_window.store(true);
-    if (m_event_queue) {
+    std::lock_guard<std::mutex> lock(m_sensor_mutex);
+    if (m_running.load() && m_event_queue) {
         if (m_accel_sensor) {
             ASensorEventQueue_enableSensor(m_event_queue, m_accel_sensor);
             ASensorEventQueue_setEventRate(m_event_queue, m_accel_sensor, 20000); // 50 Hz
@@ -81,7 +84,8 @@ void NativeSensorCollector::start_sampling_window() {
 
 void NativeSensorCollector::stop_sampling_window() {
     m_in_touch_window.store(false);
-    if (m_event_queue) {
+    std::lock_guard<std::mutex> lock(m_sensor_mutex);
+    if (m_running.load() && m_event_queue) {
         if (m_accel_sensor) {
             ASensorEventQueue_disableSensor(m_event_queue, m_accel_sensor);
         }
@@ -92,14 +96,20 @@ void NativeSensorCollector::stop_sampling_window() {
 }
 
 void NativeSensorCollector::worker_loop() {
-    m_looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
-    if (!m_looper || !m_sensor_manager) {
+    ALooper* looper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
+    if (!looper || !m_sensor_manager) {
         return;
     }
 
-    m_event_queue = ASensorManager_createEventQueue(m_sensor_manager, m_looper, 1, nullptr, nullptr);
-    if (!m_event_queue) {
+    ASensorEventQueue* queue = ASensorManager_createEventQueue(m_sensor_manager, looper, 1, nullptr, nullptr);
+    if (!queue) {
         return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_sensor_mutex);
+        m_looper = looper;
+        m_event_queue = queue;
     }
 
     constexpr int max_events = 16;
@@ -109,7 +119,7 @@ void NativeSensorCollector::worker_loop() {
         int ident = ALooper_pollOnce(50, nullptr, nullptr, nullptr);
         if (ident == 1) {
             ssize_t num_events = 0;
-            while ((num_events = ASensorEventQueue_getEvents(m_event_queue, events, max_events)) > 0) {
+            while ((num_events = ASensorEventQueue_getEvents(queue, events, max_events)) > 0) {
                 std::lock_guard<std::mutex> lock(m_data_mutex);
                 for (ssize_t i = 0; i < num_events; ++i) {
                     const ASensorEvent& ev = events[i];
@@ -137,10 +147,12 @@ void NativeSensorCollector::worker_loop() {
         }
     }
 
-    if (m_event_queue) {
-        ASensorManager_destroyEventQueue(m_sensor_manager, m_event_queue);
+    {
+        std::lock_guard<std::mutex> lock(m_sensor_mutex);
         m_event_queue = nullptr;
+        m_looper = nullptr;
     }
+    ASensorManager_destroyEventQueue(m_sensor_manager, queue);
 }
 
 void NativeSensorCollector::onTouchDown(float, float, float pressure, float size,
@@ -180,6 +192,11 @@ void NativeSensorCollector::onTouchMove(float, float, float pressure, float, flo
 
 void NativeSensorCollector::onTouchUp(float, float) {
     stop_sampling_window();
+}
+
+bool NativeSensorCollector::has_synthetic_touches() {
+    std::lock_guard<std::mutex> lock(m_data_mutex);
+    return m_synthetic_touch_counter > 0;
 }
 
 uint8_t NativeSensorCollector::get_bot_likelihood_score() {

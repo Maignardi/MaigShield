@@ -35,10 +35,20 @@ static jlong native_scan_integrity(JNIEnv* env, jclass) {
 
 static jbyteArray native_pack_envelope(JNIEnv* env, jclass, jlong java_threat_flags, jbyteArray binding_hash) {
     uint64_t native_flags = IntegrityScanner::scan_all(env);
-    uint64_t total_flags = native_flags | static_cast<uint64_t>(java_threat_flags);
-
     uint8_t bot_score = NativeSensorCollector::instance().get_bot_likelihood_score();
     uint8_t duress_score = NativeSensorCollector::instance().get_duress_tremor_index();
+
+    if (NativeSensorCollector::instance().has_synthetic_touches()) {
+        native_flags |= FLAG_SYNTHETIC_TOUCH_DETECTED;
+    }
+    if (bot_score >= 120) {
+        native_flags |= FLAG_BOT_DETECTED;
+    }
+    if (duress_score >= 120) {
+        native_flags |= FLAG_DURESS_DETECTED;
+    }
+
+    uint64_t total_flags = native_flags | static_cast<uint64_t>(java_threat_flags);
 
     const uint8_t* hash_bytes = nullptr;
     jbyte* pinned_hash = nullptr;

@@ -53,6 +53,7 @@ public:
     // Compute final biometrics indices (0..255)
     uint8_t get_bot_likelihood_score();
     uint8_t get_duress_tremor_index();
+    bool has_synthetic_touches();
 
 private:
     NativeSensorCollector();
@@ -71,6 +72,7 @@ private:
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_in_touch_window{false};
     std::thread m_worker_thread;
+    std::mutex m_sensor_mutex;
 
     std::mutex m_data_mutex;
     WelfordAccumulator m_accel_jitter;

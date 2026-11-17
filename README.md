@@ -58,7 +58,7 @@ The header value is URL-safe Base64 (no padding, no wrap) encoding the following
 | `15+K` | `ciphertext_len` | 4 bytes | Length `C` of AES-GCM ciphertext + 16-byte authentication tag. |
 | `19+K` | `ciphertext` | `C` bytes | AES-256-GCM encrypted `TelemetryEnvelope` (AAD = `protocol_version || encapsulated_key`). |
 | `19+K+C` | `signature_len` | 2 bytes | Length `S` of DER-encoded ECDSA signature. |
-| `21+K+C` | `hardware_signature` | `S` bytes | `SHA256withECDSA` over `encapsulated_key || gcm_iv || ciphertext` via StrongBox/TEE. |
+| `21+K+C` | `hardware_signature` | `S` bytes | `SHA256withECDSA` over `protocol_version || encapsulated_key || gcm_iv || ciphertext` via StrongBox/TEE. |
 
 ### 2. Decrypted `TelemetryEnvelope` (76 bytes, little-endian)
 
@@ -100,7 +100,9 @@ Before encryption, threat indicators are packed into a 64-bit bitmask and shuffl
 | `16` | `FLAG_ACCESSIBILITY_ABUSE` | Kotlin | Non-system `AccessibilityService` with window retrieval or gesture injection. |
 | `17` | `FLAG_SCREEN_MIRRORING` | Kotlin | Active `VirtualDisplay` / presentation / public secondary display. |
 | `18` | `FLAG_TAPJACKING_DETECTED` | Kotlin | `FLAG_WINDOW_IS_OBSCURED` or `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`. |
-| `19` | `FLAG_SYNTHETIC_TOUCH_DETECTED` | Kotlin | `deviceId <= 0`, zero pressure, or zero contact area on `ACTION_DOWN`. |
+| `19` | `FLAG_SYNTHETIC_TOUCH_DETECTED` | Native / Kotlin | `deviceId <= 0`, zero pressure, or zero contact area on `ACTION_DOWN`. |
+| `20` | `FLAG_DURESS_DETECTED` | Native | Native `duress_tremor_index >= 120` via NDK `ASensorManager`. |
+| `21` | `FLAG_BOT_DETECTED` | Native | Native `bot_likelihood_score >= 120` via Welford & cadence analysis. |
 | `22` | `FLAG_DEBUGGABLE_APP` | Kotlin | `ApplicationInfo.FLAG_DEBUGGABLE` set when `allowDebuggable = false`. |
 
 Bits `32..63` carry the specific honeypot ID mask when bit `7` is set.
@@ -188,7 +190,7 @@ For manual usage (e.g., Retrofit/Ktor/custom stacks), call `MaigShield.getInstan
 ## Server-Side Verification Flow
 
 1. Base64URL-decode `X-MaigShield-Proof` and parse `protocol_version`, `encapsulated_key`, `gcm_iv`, `ciphertext`, and `hardware_signature`.
-2. Verify `hardware_signature` (`SHA256withECDSA`) over `encapsulated_key || gcm_iv || ciphertext` using the device's attested public key.
+2. Verify `hardware_signature` (`SHA256withECDSA`) over `protocol_version || encapsulated_key || gcm_iv || ciphertext` using the device's attested public key.
 3. Decrypt `encapsulated_key` with the server's RSA private key (`RSA/ECB/OAEPWithSHA-256AndMGF1Padding`).
 4. Decrypt `ciphertext` using AES-256-GCM with AAD = `protocol_version || encapsulated_key`.
 5. Validate `magic == 0x4D414947`, verify `crc32`, check `monotonic_counter` > last seen counter for this device, and verify `request_binding_hash` matches `SHA-256(METHOD || URL_PATH || SHA-256(BODY))`.
