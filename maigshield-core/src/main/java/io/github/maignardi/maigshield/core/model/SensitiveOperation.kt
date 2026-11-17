@@ -1,0 +1,14 @@
+package io.github.maignardi.maigshield.core.model
+
+enum class SensitiveOperation {
+    LOGIN,
+    ACCOUNT_REGISTRATION,
+    PASSWORD_CHANGE,
+    PIX_TRANSFER,
+    BANK_TRANSFER,
+    CARD_MANAGEMENT,
+    PAYMENT_AUTHORIZATION,
+    BENEFICIARY_REGISTRATION,
+    WITHDRAWAL_OPERATION,
+    ACCOUNT_RECOVERY
+}

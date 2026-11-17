@@ -1,0 +1,6 @@
+jdk:
+  - openjdk17
+before_install:
+  - sdkmanager "cmake;3.22.1" "ndk;28.2.13676358"
+install:
+  - ./gradlew :maigshield:publishToMavenLocal
