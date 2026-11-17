@@ -29,20 +29,25 @@ uint64_t IntegrityScanner::get_honeypot_mask() {
 }
 
 bool IntegrityScanner::check_ptrace_seal() {
-    // PTRACE_TRACEME can only succeed once per process lifecycle.
-    // Sealing once prevents false positives (-EPERM) on subsequent scans while
-    // permanently recording if a debugger had already attached before init.
-    static std::once_flag s_seal_once;
-    static std::atomic<bool> s_seal_failed{false};
+    // On Android (API 26+), SELinux/seccomp blocks PTRACE_TRACEME for untrusted_app
+    // with -EACCES/-EPERM even on clean devices. Instead, verify kernel tracing state
+    // via /proc/self/wchan (returns "ptrace_stop" when stopped by a tracer).
+    OBFUSCATE_STACK(path_wchan, "/proc/self/wchan");
+    long fd = sys::sys_openat(AT_FDCWD, path_wchan.c_str(), O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) {
+        return false;
+    }
 
-    std::call_once(s_seal_once, []() {
-        long ret = sys::sys_ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
-        if (ret < 0) {
-            s_seal_failed.store(true, std::memory_order_relaxed);
-        }
-    });
+    char wchan_buf[128];
+    long n = sys::sys_read(static_cast<int>(fd), wchan_buf, sizeof(wchan_buf) - 1);
+    sys::sys_close(static_cast<int>(fd));
+    if (n <= 0) {
+        return false;
+    }
+    wchan_buf[n] = '\0';
 
-    return s_seal_failed.load(std::memory_order_relaxed);
+    OBFUSCATE_STACK(kw_ptrace, "ptrace_stop");
+    return strstr(wchan_buf, kw_ptrace.c_str()) != nullptr;
 }
 
 bool IntegrityScanner::check_tracer_pid() {

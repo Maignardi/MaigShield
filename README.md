@@ -137,7 +137,7 @@ Add the dependency to your module's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Maignardi:MaigShield:v1.0.3")
+    implementation("com.github.Maignardi:MaigShield:v1.0.4")
 
     // Required only if using MaigShieldInterceptor
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
