@@ -98,4 +98,5 @@ dependencies {
     compileOnly(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp)
 }

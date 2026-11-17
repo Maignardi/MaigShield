@@ -11,11 +11,13 @@ import java.nio.ByteOrder
 import java.security.KeyPairGenerator
 import java.security.SecureRandom
 import java.security.spec.MGF1ParameterSpec
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
+import org.junit.Assert.assertThrows
 
 class HybridCryptoEnvelopeTest {
 
@@ -94,5 +96,130 @@ class HybridCryptoEnvelopeTest {
         assertEquals(2L, diag.scrambledFlags)
         assertEquals(0x11223344, diag.crc32)
         assertEquals(mockHash.joinToString("") { "%02x".format(it) }, diag.bindingHashHex)
+    }
+
+    @Test
+    fun test_aad_tampering_protocol_version_fails_gcm_authentication() {
+        val kpg = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
+        val bankKeyPair = kpg.generateKeyPair()
+
+        val rawEnvelope = ByteArray(76) { 0x42 }
+        val aesKey = KeyGenerator.getInstance("AES").apply { init(256, SecureRandom()) }.generateKey()
+        val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        rsaCipher.init(
+            Cipher.ENCRYPT_MODE,
+            bankKeyPair.public,
+            OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        )
+        val encapsulatedKey = rsaCipher.doFinal(aesKey.encoded)
+
+        val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
+        val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+        aesCipher.updateAAD(byteArrayOf(1))
+        aesCipher.updateAAD(encapsulatedKey)
+        val ciphertext = aesCipher.doFinal(rawEnvelope)
+
+        // Tamper protocol_version from 1 -> 2 in the serialized container
+        val baos = ByteArrayOutputStream()
+        DataOutputStream(baos).use { dos ->
+            dos.writeByte(2)
+            dos.writeShort(encapsulatedKey.size)
+            dos.write(encapsulatedKey)
+            dos.write(iv)
+            dos.writeInt(ciphertext.size)
+            dos.write(ciphertext)
+            dos.writeShort(64)
+            dos.write(ByteArray(64))
+        }
+        val tamperedToken = SafeBase64.encodeUrlSafe(baos.toByteArray())
+
+        assertThrows(AEADBadTagException::class.java) {
+            StrongBoxSigner.decryptProofTokenForDiagnostics(tamperedToken, bankKeyPair.private)
+        }
+    }
+
+    @Test
+    fun test_ciphertext_bitflip_fails_gcm_authentication() {
+        val kpg = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
+        val bankKeyPair = kpg.generateKeyPair()
+
+        val rawEnvelope = ByteArray(76) { 0x11 }
+        val aesKey = KeyGenerator.getInstance("AES").apply { init(256, SecureRandom()) }.generateKey()
+        val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        rsaCipher.init(
+            Cipher.ENCRYPT_MODE,
+            bankKeyPair.public,
+            OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        )
+        val encapsulatedKey = rsaCipher.doFinal(aesKey.encoded)
+
+        val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
+        val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+        aesCipher.updateAAD(byteArrayOf(1))
+        aesCipher.updateAAD(encapsulatedKey)
+        val ciphertext = aesCipher.doFinal(rawEnvelope)
+
+        // Flip 1 bit in ciphertext
+        ciphertext[10] = (ciphertext[10].toInt() xor 0x01).toByte()
+
+        val baos = ByteArrayOutputStream()
+        DataOutputStream(baos).use { dos ->
+            dos.writeByte(1)
+            dos.writeShort(encapsulatedKey.size)
+            dos.write(encapsulatedKey)
+            dos.write(iv)
+            dos.writeInt(ciphertext.size)
+            dos.write(ciphertext)
+            dos.writeShort(64)
+            dos.write(ByteArray(64))
+        }
+        val tamperedToken = SafeBase64.encodeUrlSafe(baos.toByteArray())
+
+        assertThrows(AEADBadTagException::class.java) {
+            StrongBoxSigner.decryptProofTokenForDiagnostics(tamperedToken, bankKeyPair.private)
+        }
+    }
+
+    @Test
+    fun test_wrong_server_private_key_fails_decapsulation() {
+        val kpg = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
+        val bankKeyPair = kpg.generateKeyPair()
+        val attackerKeyPair = kpg.generateKeyPair()
+
+        val rawEnvelope = ByteArray(76) { 0x33 }
+        val aesKey = KeyGenerator.getInstance("AES").apply { init(256, SecureRandom()) }.generateKey()
+        val rsaCipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        rsaCipher.init(
+            Cipher.ENCRYPT_MODE,
+            bankKeyPair.public,
+            OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        )
+        val encapsulatedKey = rsaCipher.doFinal(aesKey.encoded)
+
+        val iv = ByteArray(12).apply { SecureRandom().nextBytes(this) }
+        val aesCipher = Cipher.getInstance("AES/GCM/NoPadding")
+        aesCipher.init(Cipher.ENCRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+        aesCipher.updateAAD(byteArrayOf(1))
+        aesCipher.updateAAD(encapsulatedKey)
+        val ciphertext = aesCipher.doFinal(rawEnvelope)
+
+        val baos = ByteArrayOutputStream()
+        DataOutputStream(baos).use { dos ->
+            dos.writeByte(1)
+            dos.writeShort(encapsulatedKey.size)
+            dos.write(encapsulatedKey)
+            dos.write(iv)
+            dos.writeInt(ciphertext.size)
+            dos.write(ciphertext)
+            dos.writeShort(64)
+            dos.write(ByteArray(64))
+        }
+        val token = SafeBase64.encodeUrlSafe(baos.toByteArray())
+
+        assertThrows(Exception::class.java) {
+            StrongBoxSigner.decryptProofTokenForDiagnostics(token, attackerKeyPair.private)
+        }
     }
 }
