@@ -9,3 +9,8 @@ build/
 */.cxx/
 .externalNativeBuild
 local.properties
+*.gpg
+*.asc
+*.jks
+*.keystore
+gradle.local.properties

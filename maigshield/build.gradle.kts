@@ -1,6 +1,8 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+
 plugins {
     alias(libs.plugins.android.library)
-    `maven-publish`
+    alias(libs.plugins.vanniktech.maven.publish)
 }
 
 android {
@@ -70,25 +72,41 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+}
 
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-        }
+mavenPublishing {
+    configure(
+        AndroidSingleVariantLibrary(
+            variant = "release",
+            sourcesJar = true,
+            publishJavadocJar = true
+        )
+    )
+
+    coordinates(
+        groupId = providers.gradleProperty("GROUP").get(),
+        artifactId = "maigshield",
+        version = providers.gradleProperty("VERSION_NAME").get()
+    )
+
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
+
+    pom {
+        name.set("MaigShield")
+        description.set(
+            "Zero-Boolean Android RASP, anti-trojan, native C++20 NDK behavioral biometrics, and StrongBox hardware key attestation SDK."
+        )
     }
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            register<MavenPublication>("release") {
-                from(components["release"])
-                groupId = "com.github.matheusmaignardi"
-                artifactId = "maigshield"
-                version = "1.0.0"
-            }
-        }
-    }
+tasks.withType<org.gradle.plugins.signing.Sign>().configureEach {
+    val hasSigningKey = providers.gradleProperty("signingInMemoryKey").isPresent ||
+        !System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey").isNullOrBlank() ||
+        providers.gradleProperty("signing.keyId").isPresent
+    val isLocalOnly = gradle.startParameter.taskNames.isNotEmpty() &&
+        gradle.startParameter.taskNames.all { it.endsWith("publishToMavenLocal") }
+    onlyIf { hasSigningKey || !isLocalOnly }
 }
 
 dependencies {

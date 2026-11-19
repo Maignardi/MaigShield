@@ -3,7 +3,7 @@
 [![Android](https://img.shields.io/badge/Android-API%2024%2B-3DDC84.svg)](https://developer.android.com)
 [![C++20](https://img.shields.io/badge/NDK-C%2B%2B20-00599C.svg)](https://developer.android.com/ndk)
 [![OWASP MASVS](https://img.shields.io/badge/OWASP-MASVS--RESILIENCE-red.svg)](https://mas.owasp.org)
-[![JitPack](https://jitpack.io/v/Maignardi/MaigShield.svg)](https://jitpack.io/#Maignardi/MaigShield)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.maignardi/maigshield.svg)](https://central.sonatype.com/artifact/io.github.maignardi/maigshield)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Client-side Android RASP, anti-trojan, behavioral biometrics, and hardware attestation library (`com.maigshield.sdk`).
@@ -119,16 +119,15 @@ Bits `32..63` carry the specific honeypot ID mask when bit `7` is set.
 
 ---
 
-## Installation (Gradle / JitPack)
+## Installation (Maven Central)
 
-Add JitPack to `settings.gradle.kts`:
+Ensure `mavenCentral()` is enabled in `settings.gradle.kts` (standard in Android projects):
 
 ```kotlin
 dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
     }
 }
 ```
@@ -137,7 +136,7 @@ Add the dependency to your module's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.Maignardi:MaigShield:v1.0.4")
+    implementation("io.github.maignardi:maigshield:1.0.4")
 
     // Required only if using MaigShieldInterceptor
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
